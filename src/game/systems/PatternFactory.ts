@@ -1,11 +1,6 @@
 import Phaser from 'phaser';
-import {
-  COLLECTIBLES,
-  GAME_HEIGHT,
-  GAME_WIDTH,
-  OBSTACLES,
-  SAFE_ZONES
-} from '../data/gameConstants';
+import { COLLECTIBLES, GAME_HEIGHT, GAME_WIDTH, OBSTACLES, SAFE_ZONES } from '../data/gameConstants';
+import type { HazardPatternKey, HeartPatternKey } from '../data/patterns';
 import type { GameplayState } from './GameplayDirector';
 
 export type HazardKind = 'verticalLaser' | 'horizontalBeam' | 'mine';
@@ -20,11 +15,9 @@ export type HazardSpawnSpec = {
 };
 
 export type HazardPatternSpec = {
-  name: string;
+  name: HazardPatternKey;
   hazards: HazardSpawnSpec[];
 };
-
-export type HeartPatternKind = 'straight' | 'upward' | 'downward' | 'wave' | 'cluster' | 'riskLine';
 
 export type HeartSpawnSpec = {
   x: number;
@@ -33,73 +26,90 @@ export type HeartSpawnSpec = {
 };
 
 export type HeartPatternSpec = {
-  kind: HeartPatternKind;
+  kind: HeartPatternKey;
   hearts: HeartSpawnSpec[];
 };
 
 export class PatternFactory {
-  static createHazardPattern(state: GameplayState, previousHazardY: number | null): HazardPatternSpec {
-    const roll = Phaser.Math.FloatBetween(0, 1);
+  static createHazardPattern(
+    state: GameplayState,
+    previousHazardY: number | null,
+    forcedPattern?: HazardPatternKey
+  ): HazardPatternSpec {
+    const pattern = forcedPattern ?? Phaser.Math.RND.pick(state.allowedHazardPatterns);
 
-    if (state.stageId >= 3 && roll > 0.72) {
-      return PatternFactory.createStaggeredPair(state, previousHazardY);
-    }
-
-    if (state.stageId >= 2 && roll > 0.56) {
-      return PatternFactory.createMine(state, previousHazardY);
-    }
-
-    if (state.stageId >= 1 && roll > 0.42) {
-      return PatternFactory.createHorizontalBeam(state, previousHazardY);
-    }
-
-    return PatternFactory.createVerticalLaser(state, previousHazardY);
-  }
-
-  static createHeartPattern(state: GameplayState, lastHazardY: number | null): HeartPatternSpec {
-    const availablePatterns: HeartPatternKind[] =
-      state.stageId === 0
-        ? ['straight', 'upward', 'downward', 'wave']
-        : ['straight', 'upward', 'downward', 'wave', 'cluster'];
-
-    if (state.stageId >= 2 && lastHazardY !== null) {
-      availablePatterns.push('riskLine');
-    }
-
-    const kind = Phaser.Math.RND.pick(availablePatterns);
-    const baseY =
-      kind === 'riskLine' && lastHazardY !== null
-        ? PatternFactory.clampY(lastHazardY + Phaser.Math.RND.pick([-1, 1]) * COLLECTIBLES.riskOffsetFromHazard, state)
-        : PatternFactory.pickHeartY(state, kind === 'cluster');
-
-    switch (kind) {
-      case 'upward':
-        return PatternFactory.createTrail('upward', baseY, state, -COLLECTIBLES.trailSpacingY);
-      case 'downward':
-        return PatternFactory.createTrail('downward', baseY, state, COLLECTIBLES.trailSpacingY);
-      case 'wave':
-        return PatternFactory.createWave(baseY, state);
-      case 'cluster':
-        return PatternFactory.createCluster(baseY, state);
-      case 'riskLine':
-        return PatternFactory.createTrail('riskLine', baseY, state, 0, GAME_WIDTH + 86);
-      case 'straight':
+    switch (pattern) {
+      case 'calmGap':
+        return { name: 'calmGap', hazards: [] };
+      case 'tallLaser':
+        return PatternFactory.createVerticalLaser('tallLaser', state, previousHazardY, state.maxHazardHeight);
+      case 'doubleOffsetLaser':
+        return PatternFactory.createDoubleOffsetLaser(state, previousHazardY);
+      case 'warningBeamEntry':
+        return PatternFactory.createHorizontalBeam('warningBeamEntry', state, previousHazardY);
+      case 'lowHazard':
+        return PatternFactory.createVerticalLaser('lowHazard', state, previousHazardY, OBSTACLES.hazardHeightMin, state.safeBottom - 62);
+      case 'highHazard':
+        return PatternFactory.createVerticalLaser('highHazard', state, previousHazardY, OBSTACLES.hazardHeightMin, state.safeTop + 62);
+      case 'mine':
+        return PatternFactory.createMine(state, previousHazardY);
+      case 'electricBar':
+        return PatternFactory.createHorizontalBeam('electricBar', state, previousHazardY, OBSTACLES.horizontalBeamWidth + 28);
+      case 'singleVerticalLaser':
       default:
-        return PatternFactory.createTrail('straight', baseY, state, 0);
+        return PatternFactory.createVerticalLaser('singleVerticalLaser', state, previousHazardY);
     }
   }
 
-  private static createVerticalLaser(state: GameplayState, previousHazardY: number | null): HazardPatternSpec {
-    const height = Phaser.Math.Between(OBSTACLES.hazardHeightMin, state.maxHazardHeight);
-    const y = PatternFactory.pickHazardY(state, previousHazardY);
+  static createHeartPattern(
+    state: GameplayState,
+    lastHazardY: number | null,
+    forcedPattern?: HeartPatternKey
+  ): HeartPatternSpec {
+    const pattern = forcedPattern ?? Phaser.Math.RND.pick(state.allowedHeartPatterns);
+    const baseY =
+      pattern === 'riskRewardLine' && lastHazardY !== null
+        ? PatternFactory.clampY(lastHazardY + Phaser.Math.RND.pick([-1, 1]) * COLLECTIBLES.riskOffsetFromHazard, state)
+        : PatternFactory.pickHeartY(state, pattern === 'smallCluster' || pattern === 'heartTunnel');
+
+    switch (pattern) {
+      case 'gentleUpwardTrail':
+        return PatternFactory.createTrail('gentleUpwardTrail', baseY, state, -COLLECTIBLES.trailSpacingY);
+      case 'gentleDownwardTrail':
+        return PatternFactory.createTrail('gentleDownwardTrail', baseY, state, COLLECTIBLES.trailSpacingY);
+      case 'waveTrail':
+        return PatternFactory.createWave(baseY, state);
+      case 'smallCluster':
+        return PatternFactory.createCluster(baseY, state);
+      case 'riskRewardLine':
+        return PatternFactory.createTrail('riskRewardLine', baseY, state, 0, GAME_WIDTH + 86, 5);
+      case 'recoveryTrail':
+        return PatternFactory.createTrail('recoveryTrail', PatternFactory.getComfortCenter(state), state, 0, GAME_WIDTH + 44, 6);
+      case 'heartTunnel':
+        return PatternFactory.createHeartTunnel(state);
+      case 'safeHorizontalTrail':
+      default:
+        return PatternFactory.createTrail('safeHorizontalTrail', baseY, state, 0);
+    }
+  }
+
+  private static createVerticalLaser(
+    name: HazardPatternKey,
+    state: GameplayState,
+    previousHazardY: number | null,
+    targetHeight?: number,
+    forcedY?: number
+  ): HazardPatternSpec {
+    const height = targetHeight ?? Phaser.Math.Between(OBSTACLES.hazardHeightMin, state.maxHazardHeight);
+    const y = forcedY ?? PatternFactory.pickHazardY(state, previousHazardY);
 
     return {
-      name: 'verticalLaser',
+      name,
       hazards: [
         {
           kind: 'verticalLaser',
           x: GAME_WIDTH + OBSTACLES.spawnLead,
-          y,
+          y: PatternFactory.clampY(y, state),
           width: OBSTACLES.hazardWidth,
           height,
           radius: 0
@@ -108,17 +118,22 @@ export class PatternFactory {
     };
   }
 
-  private static createHorizontalBeam(state: GameplayState, previousHazardY: number | null): HazardPatternSpec {
+  private static createHorizontalBeam(
+    name: HazardPatternKey,
+    state: GameplayState,
+    previousHazardY: number | null,
+    width: number = OBSTACLES.horizontalBeamWidth
+  ): HazardPatternSpec {
     const y = PatternFactory.pickHazardY(state, previousHazardY);
 
     return {
-      name: 'horizontalBeam',
+      name,
       hazards: [
         {
           kind: 'horizontalBeam',
           x: GAME_WIDTH + OBSTACLES.spawnLead,
           y,
-          width: OBSTACLES.horizontalBeamWidth,
+          width,
           height: OBSTACLES.horizontalBeamHeight,
           radius: 0
         }
@@ -144,42 +159,44 @@ export class PatternFactory {
     };
   }
 
-  private static createStaggeredPair(state: GameplayState, previousHazardY: number | null): HazardPatternSpec {
+  private static createDoubleOffsetLaser(state: GameplayState, previousHazardY: number | null): HazardPatternSpec {
     const firstY = PatternFactory.pickHazardY(state, previousHazardY);
     const direction = firstY < GAME_HEIGHT / 2 ? 1 : -1;
-    const secondY = PatternFactory.clampY(firstY + direction * Phaser.Math.Between(150, 210), state);
+    const secondY = PatternFactory.clampY(firstY + direction * Phaser.Math.Between(158, 220), state);
+    const height = Math.min(state.maxHazardHeight, OBSTACLES.hazardHeightMin + 52);
 
     return {
-      name: 'staggeredPair',
+      name: 'doubleOffsetLaser',
       hazards: [
         {
           kind: 'verticalLaser',
           x: GAME_WIDTH + OBSTACLES.spawnLead,
           y: firstY,
           width: OBSTACLES.hazardWidth,
-          height: Phaser.Math.Between(OBSTACLES.hazardHeightMin, state.maxHazardHeight - 12),
+          height,
           radius: 0
         },
         {
-          kind: 'mine',
-          x: GAME_WIDTH + OBSTACLES.spawnLead + 160,
+          kind: 'verticalLaser',
+          x: GAME_WIDTH + OBSTACLES.spawnLead + 168,
           y: secondY,
-          width: OBSTACLES.mineRadius * 2,
-          height: OBSTACLES.mineRadius * 2,
-          radius: OBSTACLES.mineRadius
+          width: OBSTACLES.hazardWidth,
+          height,
+          radius: 0
         }
       ]
     };
   }
 
   private static createTrail(
-    kind: HeartPatternKind,
+    kind: HeartPatternKey,
     baseY: number,
     state: GameplayState,
     slopeY: number,
-    startX = GAME_WIDTH + 48
+    startX = GAME_WIDTH + 48,
+    forcedCount?: number
   ): HeartPatternSpec {
-    const count = Phaser.Math.Between(COLLECTIBLES.trailMinCount, COLLECTIBLES.trailMaxCount);
+    const count = forcedCount ?? Phaser.Math.Between(COLLECTIBLES.trailMinCount, COLLECTIBLES.trailMaxCount);
     const hearts = Array.from({ length: count }, (_, index) => ({
       x: startX + index * COLLECTIBLES.trailSpacingX,
       y: PatternFactory.clampY(baseY + index * slopeY, state),
@@ -190,14 +207,14 @@ export class PatternFactory {
   }
 
   private static createWave(baseY: number, state: GameplayState): HeartPatternSpec {
-    const count = Phaser.Math.Between(4, 6);
+    const count = Phaser.Math.Between(4, 7);
     const hearts = Array.from({ length: count }, (_, index) => ({
       x: GAME_WIDTH + 48 + index * COLLECTIBLES.trailSpacingX,
-      y: PatternFactory.clampY(baseY + Math.sin(index * 0.95) * 26, state),
+      y: PatternFactory.clampY(baseY + Math.sin(index * 0.95) * 28, state),
       scale: 0.82
     }));
 
-    return { kind: 'wave', hearts };
+    return { kind: 'waveTrail', hearts };
   }
 
   private static createCluster(baseY: number, state: GameplayState): HeartPatternSpec {
@@ -213,7 +230,22 @@ export class PatternFactory {
       scale: 0.78
     }));
 
-    return { kind: 'cluster', hearts };
+    return { kind: 'smallCluster', hearts };
+  }
+
+  private static createHeartTunnel(state: GameplayState): HeartPatternSpec {
+    const center = PatternFactory.getComfortCenter(state);
+    const hearts = Array.from({ length: 8 }, (_, index) => {
+      const isTop = index % 2 === 0;
+
+      return {
+        x: GAME_WIDTH + 54 + Math.floor(index / 2) * 46,
+        y: PatternFactory.clampY(center + (isTop ? -42 : 42), state),
+        scale: 0.76
+      };
+    });
+
+    return { kind: 'heartTunnel', hearts };
   }
 
   private static pickHeartY(state: GameplayState, allowRisk: boolean): number {
@@ -240,6 +272,10 @@ export class PatternFactory {
     }
 
     return PatternFactory.clampY(y, state);
+  }
+
+  private static getComfortCenter(state: GameplayState): number {
+    return (state.comfortTop + state.comfortBottom) / 2;
   }
 
   private static clampY(y: number, state: GameplayState): number {

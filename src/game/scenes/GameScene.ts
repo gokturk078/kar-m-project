@@ -12,10 +12,13 @@ import {
 } from '../data/gameConstants';
 import { GameplayDirector } from '../systems/GameplayDirector';
 import { InputManager } from '../systems/InputManager';
+import { MissionSystem } from '../systems/MissionSystem';
 import type { HazardPatternSpec, HazardSpawnSpec, HeartPatternSpec, HeartSpawnSpec } from '../systems/PatternFactory';
+import { ProgressionSystem, type ProgressionState } from '../systems/ProgressionSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { ScrollManager } from '../systems/ScrollManager';
 import { SpawnDirector } from '../systems/SpawnDirector';
+import { StageManager } from '../systems/StageManager';
 
 type MovingArcadeObject = Phaser.GameObjects.GameObject & {
   x: number;
@@ -42,6 +45,7 @@ type ColliderObject =
 export class GameScene extends Phaser.Scene {
   private inputManager!: InputManager;
   private scrollManager!: ScrollManager;
+  private stageManager!: StageManager;
   private gameplayDirector!: GameplayDirector;
   private spawnDirector!: SpawnDirector;
   private player!: Player;
@@ -52,6 +56,10 @@ export class GameScene extends Phaser.Scene {
   private bestText!: Phaser.GameObjects.Text;
   private heartsCollected = 0;
   private bestDistance = 0;
+  private bestDistanceBeforeRun = 0;
+  private highestStageReached = 0;
+  private elapsedSeconds = 0;
+  private progressionAtRunStart!: ProgressionState;
   private isGameOver = false;
 
   constructor() {
@@ -61,10 +69,16 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.isGameOver = false;
     this.heartsCollected = 0;
+    this.highestStageReached = 0;
+    this.elapsedSeconds = 0;
     this.bestDistance = SaveSystem.getBestDistance();
+    this.bestDistanceBeforeRun = this.bestDistance;
+    this.progressionAtRunStart = ProgressionSystem.recordFlightStarted();
 
     this.inputManager = new InputManager(this);
     this.scrollManager = new ScrollManager(this);
+    this.stageManager = new StageManager();
+    this.scrollManager.applyTheme(this.stageManager.current.theme, 0);
     this.gameplayDirector = new GameplayDirector();
     this.spawnDirector = new SpawnDirector();
     this.player = new Player(this);
@@ -86,7 +100,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     const deltaSeconds = Math.min(delta / 1000, 0.033);
-    const gameplayState = this.gameplayDirector.update(deltaSeconds, this.scrollManager.currentDistance);
+    const stageUpdate = this.stageManager.update(this.scrollManager.currentDistance);
+    const gameplayState = this.gameplayDirector.update(deltaSeconds, this.scrollManager.currentDistance, stageUpdate.stage);
+    this.elapsedSeconds = gameplayState.elapsedSeconds;
+    this.highestStageReached = Math.max(this.highestStageReached, gameplayState.stageId);
+
+    if (stageUpdate.changed) {
+      this.scrollManager.applyTheme(stageUpdate.stage.theme);
+      this.showStageTitle(stageUpdate.stage.name);
+    }
 
     this.player.updatePlayer(deltaSeconds, this.inputManager.isThrusting);
     this.scrollManager.update(deltaSeconds, gameplayState.scrollSpeed);
@@ -174,9 +196,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    const theme = this.stageManager.current.theme;
     const hazard = this.add
       .rectangle(spec.x, spec.y, spec.width, spec.height, COLORS.danger, spec.kind === 'horizontalBeam' ? 0.78 : 0.86)
-      .setStrokeStyle(2, COLORS.rose, 0.95)
+      .setStrokeStyle(2, theme.accentColor, 0.95)
       .setDepth(12);
 
     if (spec.kind === 'verticalLaser') {
@@ -200,9 +223,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnMine(spec: HazardSpawnSpec): void {
+    const theme = this.stageManager.current.theme;
     const mine = this.add.circle(spec.x, spec.y, spec.radius, COLORS.danger, 0.9).setDepth(12);
-    const core = this.add.circle(spec.x, spec.y, spec.radius * 0.42, COLORS.cyan, 0.82).setDepth(13);
-    const ring = this.add.circle(spec.x, spec.y, spec.radius + 8, COLORS.pink, 0.12).setDepth(11);
+    const core = this.add.circle(spec.x, spec.y, spec.radius * 0.42, theme.neonColor, 0.82).setDepth(13);
+    const ring = this.add.circle(spec.x, spec.y, spec.radius + 8, theme.accentColor, 0.12).setDepth(11);
 
     mine.setData('linkedObjects', [
       { object: core, offsetX: 0, offsetY: 0 },
@@ -230,8 +254,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addVerticalHazardGlow(laser: Phaser.GameObjects.Rectangle, height: number): void {
-    const topNode = this.add.circle(laser.x, laser.y - height / 2, 12, COLORS.cyan, 0.85).setDepth(13);
-    const bottomNode = this.add.circle(laser.x, laser.y + height / 2, 12, COLORS.cyan, 0.85).setDepth(13);
+    const theme = this.stageManager.current.theme;
+    const topNode = this.add.circle(laser.x, laser.y - height / 2, 12, theme.neonColor, 0.85).setDepth(13);
+    const bottomNode = this.add.circle(laser.x, laser.y + height / 2, 12, theme.neonColor, 0.85).setDepth(13);
 
     laser.setData('linkedObjects', [
       { object: topNode, offsetX: 0, offsetY: -height / 2 },
@@ -248,8 +273,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addHorizontalHazardGlow(beam: Phaser.GameObjects.Rectangle, width: number): void {
-    const leftNode = this.add.circle(beam.x - width / 2, beam.y, 9, COLORS.cyan, 0.82).setDepth(13);
-    const rightNode = this.add.circle(beam.x + width / 2, beam.y, 9, COLORS.cyan, 0.82).setDepth(13);
+    const theme = this.stageManager.current.theme;
+    const leftNode = this.add.circle(beam.x - width / 2, beam.y, 9, theme.neonColor, 0.82).setDepth(13);
+    const rightNode = this.add.circle(beam.x + width / 2, beam.y, 9, theme.neonColor, 0.82).setDepth(13);
 
     beam.setData('linkedObjects', [
       { object: leftNode, offsetX: -width / 2, offsetY: 0 },
@@ -266,8 +292,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addWarningMarker(hazard: Phaser.GameObjects.Shape, y: number, height: number): void {
+    const theme = this.stageManager.current.theme;
     const warning = this.add
-      .rectangle(GAME_WIDTH - 8, y, 6, Math.max(32, height), COLORS.danger, 0.75)
+      .rectangle(GAME_WIDTH - 8, y, 6, Math.max(32, height), theme.accentColor, 0.75)
       .setDepth(18);
 
     hazard.setData('warningMarker', warning);
@@ -398,13 +425,71 @@ export class GameScene extends Phaser.Scene {
 
     const finalDistance = Math.floor(this.scrollManager.currentDistance);
     const bestDistance = SaveSystem.setBestDistance(finalDistance);
+    const missionResult = MissionSystem.completeRun({
+      distance: finalDistance,
+      hearts: this.heartsCollected,
+      elapsedSeconds: this.elapsedSeconds,
+      highestStageReached: this.highestStageReached,
+      totalFlights: this.progressionAtRunStart.totalFlights,
+      totalHeartsAfterRun: this.progressionAtRunStart.totalHearts + this.heartsCollected,
+      bestDistanceBeforeRun: this.bestDistanceBeforeRun
+    });
+    const progressionResult = ProgressionSystem.recordRun({
+      distance: finalDistance,
+      hearts: this.heartsCollected,
+      bestDistance,
+      highestStageReached: this.highestStageReached,
+      missionRewardHearts: missionResult.rewardHearts,
+      missionRewardXp: missionResult.rewardXp,
+      completedMissionIds: missionResult.completedMissionIds
+    });
 
     this.time.delayedCall(260, () => {
       this.scene.start('GameOverScene', {
         distance: finalDistance,
         hearts: this.heartsCollected,
-        bestDistance
+        bestDistance,
+        highestStageReached: this.highestStageReached,
+        completedMissions: missionResult.completedMissions,
+        progression: progressionResult
       });
+    });
+  }
+
+  private showStageTitle(stageName: string): void {
+    const title = this.add
+      .text(GAME_WIDTH / 2, 128, stageName, {
+        align: 'center',
+        color: '#fff7fb',
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontSize: '28px',
+        fontStyle: 'bold'
+      })
+      .setOrigin(0.5)
+      .setDepth(70)
+      .setAlpha(0);
+    const subtitle = this.add
+      .text(GAME_WIDTH / 2, 162, 'new section', {
+        color: '#ffd7e8',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '13px'
+      })
+      .setOrigin(0.5)
+      .setDepth(70)
+      .setAlpha(0);
+
+    this.tweens.add({
+      targets: [title, subtitle],
+      alpha: { from: 0, to: 1 },
+      y: '-=8',
+      duration: 280,
+      yoyo: true,
+      hold: 760,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        title.destroy();
+        subtitle.destroy();
+      }
     });
   }
 

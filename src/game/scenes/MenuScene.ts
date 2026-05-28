@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { COLORS, GAME_HEIGHT, GAME_WIDTH, UI } from '../data/gameConstants';
 import { ROMANTIC_MESSAGES } from '../data/romanticMessages';
+import { ProgressionSystem } from '../systems/ProgressionSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 
 export class MenuScene extends Phaser.Scene {
@@ -9,6 +10,9 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    const progression = ProgressionSystem.getState();
+    const nextUnlock = ProgressionSystem.getNextUnlock(progression);
+
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, COLORS.backgroundTop).setOrigin(0);
     this.createBackdrop();
 
@@ -35,15 +39,9 @@ export class MenuScene extends Phaser.Scene {
 
     this.add.image(GAME_WIDTH / 2, 356, 'player-heartpack').setScale(2.3).setAngle(-8);
 
-    this.add
-      .text(GAME_WIDTH / 2, 456, `Best distance: ${SaveSystem.getBestDistance()} m`, {
-        color: '#bfb4ff',
-        fontFamily: 'Inter, system-ui, sans-serif',
-        fontSize: '17px'
-      })
-      .setOrigin(0.5);
+    this.createProgressPanel(466, progression, SaveSystem.getBestDistance(), nextUnlock);
 
-    this.createButton(GAME_WIDTH / 2, 548, 'Start Flight', () => {
+    this.createButton(GAME_WIDTH / 2, 620, 'Start Flight', () => {
       this.scene.start('GameScene');
     });
   }
@@ -94,5 +92,44 @@ export class MenuScene extends Phaser.Scene {
       repeat: -1,
       ease: 'Sine.easeInOut'
     });
+  }
+
+  private createProgressPanel(
+    y: number,
+    progression: ReturnType<typeof ProgressionSystem.getState>,
+    bestDistance: number,
+    nextUnlock: ReturnType<typeof ProgressionSystem.getNextUnlock>
+  ): void {
+    this.add.rectangle(GAME_WIDTH / 2, y, 304, 112, COLORS.navy, 0.72).setStrokeStyle(1, COLORS.lavender, 0.3);
+    this.add
+      .text(70, y - 34, `Level ${progression.level}`, {
+        color: '#fff7fb',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '18px',
+        fontStyle: '700'
+      })
+      .setOrigin(0, 0.5);
+    this.add
+      .text(GAME_WIDTH - 70, y - 34, `Best ${Math.max(bestDistance, progression.bestDistance)} m`, {
+        color: '#bfb4ff',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '14px'
+      })
+      .setOrigin(1, 0.5);
+    this.add
+      .text(70, y - 4, `Total hearts ${progression.totalHearts}`, {
+        color: '#ffd7e8',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '14px'
+      })
+      .setOrigin(0, 0.5);
+    this.add
+      .text(70, y + 30, `Next: ${nextUnlock.teaser.title} (${Math.min(Math.floor(nextUnlock.progress), nextUnlock.target)}/${nextUnlock.target})`, {
+        color: '#ffb8d7',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '12px',
+        wordWrap: { width: 250 }
+      })
+      .setOrigin(0, 0.5);
   }
 }

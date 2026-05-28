@@ -170,5 +170,7 @@ export const UI = {
 } as const;
 
 export const STORAGE_KEYS = {
-  bestDistance: 'heartpackJourney.bestDistance'
+  bestDistance: 'heartpackJourney.bestDistance',
+  progression: 'heartpackJourney.progression',
+  missions: 'heartpackJourney.missions'
 } as const;
